@@ -1,0 +1,595 @@
+---
+title: "Aggregation_stats_230601"
+author: "Max Elliott"
+date: "2023-06-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+#### Here's the code I used to analyze the data and make the plots for the 2024 Imaging Neuroscience Paper
+#### Link to paper - https://doi.org/10.1162/imag_a_00175
+
+
+
+library(conflicted)
+library(RColorBrewer)
+library(boot)
+library(corrplot)
+library(psych)
+library(svglite)
+library(magick)
+library(png)
+library(ggpubr)
+library(lme4)
+library(tidyverse)
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+
+set.seed(221219)
+
+volData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aseg_vol_230503.csv")
+lhThickData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aparc_thk_lh_230503.csv")
+rhThickData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aparc_thk_rh_230503.csv")
+lhAreaData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aparc_area_lh_230503.csv")
+rhAreaData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aparc_area_rh_230503.csv")
+lhGWconData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aseg_w-g.pct.stats_lh_testExtr.csv")
+rhGWconData<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Data/TriarchyOA_cs_FS_aseg_w-g.pct.stats_rh_testExtr.csv")
+
+##Grab data from scan names
+volData<-volData %>% separate(c("Date", "ID","scanID"),col = "Measure:volume",sep = "_",extra = "merge",convert = T)
+lhThickData <- lhThickData %>% separate(c("Date", "ID","scanID"),col = "lh.aparc.thickness",sep = "_",extra = "merge",convert = T)
+rhThickData <- rhThickData %>% separate(c("Date", "ID","scanID"),col = "rh.aparc.thickness",sep = "_",extra = "merge",convert = T)
+lhAreaData <- lhAreaData %>% separate(c("Date", "ID","scanID"),col = "lh.aparc.area",sep = "_",extra = "merge",convert = T)
+rhAreaData <- rhAreaData %>% separate(c("Date", "ID","scanID"),col = "rh.aparc.area",sep = "_",extra = "merge",convert = T)
+lhGWconData <- lhGWconData %>% separate(c("Date", "ID","scanID"),col = "Measure:mean",sep = "_",extra = "merge",convert = T)
+rhGWconData <- rhGWconData %>% separate(c("Date", "ID","scanID"),col = "Measure:mean",sep = "_",extra = "merge",convert = T)
+
+###Make dataframes longer
+volDataLong<-volData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "value")
+lhThickLong<-lhThickData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "value")
+rhThickLong<-rhThickData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "value")
+lhAreaLong<-lhAreaData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "area")
+rhAreaLong<-rhAreaData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "area")
+lhGWconLong<-lhGWconData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "value")
+rhGWconLong<-rhGWconData %>% pivot_longer(!(Date:scanID),names_to = "region", values_to = "value")
+
+##Add in session variable
+volDataLong<-volDataLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+lhThickLong<-lhThickLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+rhThickLong<-rhThickLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+lhThickLong<-lhThickLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+rhThickLong<-rhThickLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+lhGWconLong<-lhGWconLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+rhGWconLong<-rhGWconLong %>% arrange(Date,ID) %>% group_by(ID) %>% mutate(session=dense_rank(Date))
+
+##Can run this to check if dense_rank work properly there should only be 3-4 sessions, 
+table(volDataLong$session)
+table(lhGWconLong$session)
+
+##Fix naming so combining data and plotting is easier
+volDataLong<-volDataLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+lhThickLong<-lhThickLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+rhThickLong<-rhThickLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+lhAreaLong<-lhAreaLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+rhAreaLong<-rhAreaLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+lhGWconLong<-lhGWconLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+rhGWconLong<-rhGWconLong %>% separate(c("Vox", "scanName","Repeat"),col = "scanID",sep = "_",extra = "merge") %>% mutate(Repeat=replace_na(Repeat,"a")) %>% unite("scanID",scanName,Vox,Repeat)
+
+
+lhThickLong<-lhThickLong %>% mutate(region = gsub("lh_", "Left-", region))
+rhThickLong<-rhThickLong %>% mutate(region = gsub("rh_", "Right-", region))
+lhAreaLong<-lhAreaLong %>% mutate(region = gsub("lh_", "Left-", region))
+rhAreaLong<-rhAreaLong %>% mutate(region = gsub("rh_", "Right-", region))
+lhGWconLong<-lhGWconLong %>% mutate(region = paste0("Left-", region))
+rhGWconLong<-rhGWconLong %>% mutate(region = paste0("Right-", region))
+
+###Combine all data into big DF
+allFSdataLong<-bind_rows(list(vol=volDataLong,Thick=lhThickLong,Thick=rhThickLong,GWcon=lhGWconLong,GWcon=rhGWconLong), .id = "origData")
+allFSdataLong<- allFSdataLong %>% mutate(ID = gsub(".ANAT", "", ID))
+allFSdataLong<- allFSdataLong %>% mutate(region = gsub("_thickness", "", region))
+
+##Fix H4FF48 so that their singleton session 1 is excluded and sessions 2 and 3 are used for test-retest instead
+allFSdataLong <- allFSdataLong %>% mutate(session = ifelse(ID == "H4FF48", session - 1, session))
+#allFSdataLong %>% select(ID,session) %>% table()
+
+allFSdataLong <- allFSdataLong %>% filter(session < 3 & session > 0,str_detect(ID,"P10395",negate=T))
+
+##Add in column for Dx
+dx <- allFSdataLong$ID %>% recode(.,P09993 = "CU", P09453 = "CU", P19820 = "FTLD", P17035 = "CU", P19822 = "FTLD", P10116 = "CU", P19821 = "FTLD", P19823 =  "FTLD", P10295 = "MCI/AD", P19434 = "CU", P19779 = "MCI/AD", P09686 = "CU", P10507 = "CU", P19834 = "CU", P19863 = "FTLD", P10020 = "CU", P09684 = "CU", P10522 = "CU", P10452 = "CU", P17162 = "CU", P10454 = "CU", P19881 = "FTLD", P19897 = "MCI/AD", P10090 = "CU", P19920 = "MCI/AD", P09811 = "CU", P10091 = "MCI/AD", P19923 = "FTLD", P10512 = "MCI/AD", P17001 = "MCI/AD", P10529 = "CU", P19919 = "MCI/AD", P19931 = "FTLD", P19507 = "MCI/AD", P19935 = "FTLD", P19562 = "MCI/AD", P10410 = "CU", P10141 = "CU", P19644 = "MCI/AD", H3QM65 = "YA",H4DY25 = "YA", H4NG35 = "YA", H4Z538 = "YA", H5UZ45  = "YA", H6MU95 = "YA", H6PW98 = "YA", H7DT28 = "YA", H7YT95 = "YA", H8FB78 = "YA", H8SU68 = "YA", H9TT58 = "YA",H4FF48 = "YA")
+allFSdataLong <- allFSdataLong %>% add_column(dx)
+
+###Add in column for exclusion
+
+allFSdataLong$excluded <- ifelse(allFSdataLong$ID %in% c("P19822","P19820","P19821"),1,0)
+
+IDs <- allFSdataLong  %>% select(ID,dx) %>% unique()
+summaryTable<-allFSdataLong %>% group_by(ID, session) %>% summarise(n=n())
+
+###Make the inclusive sample and the sample with the worst segmentations left out
+IDs<- IDs$ID %>% str_remove(.,"P19822|P19820|P19821")
+testFSdataLong <- allFSdataLong %>% filter(str_detect(scanID,"_reg",negate=T)) %>% filter(dx != "FTLD")
+allFSdataLong <- allFSdataLong %>% filter(str_detect(scanID,"_reg",negate=T))
+allCUdataLong <- allFSdataLong %>% filter(dx == "CU")
+allFTLDdataLong <- allFSdataLong %>% filter(dx == "FTLD")
+allADdataLong <- allFSdataLong %>% filter(dx == "MCI/AD")
+allYAdataLong <- allFSdataLong %>% filter(dx == "YA")
+#Make a list so that you can make all the figures for different subsets of the data
+allDataLongList<-lst(primary=testFSdataLong,CU=allCUdataLong,FTLD=allFTLDdataLong,AD=allADdataLong,all=allFSdataLong,YA=allYAdataLong)
+
+allFSdataLong  %>% select(ID,dx) %>% unique() %>% group_by(dx) %>% summarise(n=n())
+testFSdataLong  %>% select(ID,dx) %>% unique() %>% group_by(dx) %>% summarise(n=n())
+
+##Lists for aggregation
+CSx6_1mmScans<-c("CSx6_1.0_a","CSx6_1.0_b","CSx6_1.0_c","CSx6_1.0_d","CSx6_1.0_e","CSx6_1.0_f","CSx6_1.0_g","CSx6_1.0_h")
+CSx6_non1mmScans<-c("CSx6_1.2_a","CSx6_0.8_a","CSx6_1.1_a","CSx6_0.9_a","CSx6_1.2_b","CSx6_0.8_b","CSx6_1.1_b","CSx6_0.9_b")
+CSx6_1mmScansBreak<-c("CSx6_1.0_a","CSx6_1.0_e")
+scanLists<-tibble(CSx6_1mmScans=CSx6_1mmScans,CSx6_non1mmScans=CSx6_non1mmScans)
+allBrainVars<- unique(allFSdataLong$region)
+badBrainVars<-c(allBrainVars[35:45],'SurfaceHoles','Optic-Chiasm','rhSurfaceHoles','lhSurfaceHoles','MaskVol-to-eTIV','BrainSegVol-to-eTIV','MaskVol','Brain-Stem','Left-vessel','Right-vessel','Left-choroid-plexus','Right-choroid-plexus','Left-WM-hypointensities')
+goodBrainVars<-setdiff(allBrainVars,badBrainVars)
+combScans1<-tibble(scans=c("CSx6_1.0_a","CSx6_1.0_b","CSx6_1.0_c","CSx6_1.0_d","CSx6_1.0_e","CSx6_1.0_f","CSx6_1.0_g","CSx6_1.0_h"),xlab="CSx6",plotWidth=(1.75+.5*8),themeTweaks="theme(axis.title.y=element_blank(),axis.text.y=element_blank(),legend.title=element_text(size=14, face='bold'),legend.text=element_text(size=14, face='bold'),legend.key.size = unit(1.0, 'lines'),legend.justification=c(0,1))")
+combScans2<-tibble(scans=CSx6_1mmScansBreak,xlab="CSx6",plotWidth=(1.75+.5*8),themeTweaks="theme(axis.title.y=element_blank(),axis.text.y=element_blank(),legend.title=element_text(size=14, face='bold'),legend.text=element_text(size=14, face='bold'),legend.key.size = unit(1.0, 'lines'),legend.justification=c(0,1))")
+combScans5<-tibble(scans=c("ADNI_1.0_a"),xlab="ADNI",plotWidth=(1.75+.5*1),themeTweaks="theme()")
+combScans8<-tibble(scans=c("CSx6_1.2_a","CSx6_0.8_a","CSx6_1.1_a","CSx6_0.9_a","CSx6_1.2_b","CSx6_0.8_b","CSx6_1.1_b","CSx6_0.9_b"),xlab="CSx6",plotWidth=(1.75+.5*8),themeTweaks="theme(axis.title.y=element_blank(),axis.text.y=element_blank(),legend.title=element_text(size=14, face='bold'),legend.text=element_text(size=14, face='bold'),legend.key.size = unit(1.0, 'lines'),legend.justification=c(0,1))")
+allScanLists<-list(CSx6_1mm=combScans1,ADNI=combScans5,CSx6_non1mmScans=combScans8,CSx6_1mmBreak=combScans2)
+combScansBreak<-tibble(scans=c("CSx6_1.0_a","CSx6_1.0_e"),xlab="CSx6",plotWidth=(1.75+.5*8),themeTweaks="theme(axis.title.y=element_blank(),axis.text.y=element_blank(),legend.title=element_text(size=14, face='bold'),legend.text=element_text(size=14, face='bold'),legend.key.size = unit(1.0, 'lines'),legend.position=c(.6,1),legend.justification=c(0,1))")
+
+#Make a list of brain Vars used in paper
+allBrainVars<- unique(allFSdataLong$region)
+badBrainVars<-c(allBrainVars[35:45],'SurfaceHoles','Optic-Chiasm','rhSurfaceHoles','lhSurfaceHoles','MaskVol-to-eTIV','BrainSegVol-to-eTIV','MaskVol','Brain-Stem','Left-vessel','Right-vessel','Left-choroid-plexus','Right-choroid-plexus','Left-WM-hypointensities')
+goodBrainVars<-setdiff(allBrainVars,badBrainVars)
+
+allThickDataLong<-bind_rows(list(lhThick=lhThickLong,rhThick=rhThickLong), .id = "origData")
+regionSelect<-allThickDataLong %>% filter(str_detect(region,"_thickness")) 
+thickRegions<-unique(regionSelect$region) %>% str_replace("_thickness","") %>% keep(!str_detect(., "MeanThickness"))
+volRegions<- allFSdataLong %>% filter(str_detect(region,"Amygdala|Accumbens|Pallidum|Caudate|Hippocampus|Putamen|Thalamus|VentralDC")) %>% ungroup() %>% select(region) %>% unique() %>% as_vector()
+paperRegions<-c(thickRegions,volRegions)
+
+
+```
+
+
+```{r organize data for stats}
+   
+df<-allDataLongList[["primary"]]
+dfName<-"primary"
+df %>% select(ID, dx) %>% unique() %>% ungroup() %>% count(dx)
+  
+statsDataFull<-tibble(ListName=character(),Ncombined=numeric(),region=character(),Session1=numeric(),Session2=numeric(),absError=numeric(),percentError=numeric())
+  
+
+for(scanListInd in c(1,2,3,4)){
+  for(nScans in 1:8){
+    
+    scanList<-allScanLists[[scanListInd]]
+    
+    plotDataLong <- df %>% filter(session < 3) %>% select(!Date)  %>% distinct() %>% filter(region %in% paperRegions)
+    
+    
+    ###For QC check
+    dxTable<-plotDataLong %>% select(ID, dx) %>% unique() %>% ungroup() %>% count(dx)
+    #write_csv(as_tibble(paste(dfName,scanListInd,nScans)),append = T,file = paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Lists/statsSampleRecords_",date,".csv"))
+   # write_csv(as_tibble(dxTable),append = T,file = paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Lists/statsSampleRecords_",date,".csv"))
+    #####
+    
+    plotDataLong <- plotDataLong %>% filter(scanID %in% as_vector(scanList[1:nScans,1])) %>% group_by(ID,region,session,origData) %>% summarise(value=mean(value))
+    plotDataWide <- plotDataLong %>% pivot_wider(names_from = c(session), names_prefix = "Session",values_from = value) %>% drop_na()
+    plotDataWide <- plotDataWide %>% mutate(absError = abs(Session1 - Session2),percentError = abs(Session1 - Session2)/(0.5*(Session1 + Session2))*100)
+    
+    statsData<-plotDataWide
+    statsData$Ncombined<-nScans
+    statsData$ListName<-names(allScanLists)[scanListInd]
+    statsDataFull <-bind_rows(statsDataFull,statsData) ###Make a plotting data frame after creating each combination of scans
+    
+  }
+}
+
+dx <- statsDataFull$ID %>% recode(.,P09993 = "CU", P09453 = "CU", P19820 = "FTLD", P17035 = "CU", P19822 = "FTLD", P10116 = "CU", P19821 = "FTLD", P19823 =  "FTLD", P10295 = "MCI/AD", P19434 = "CU", P19779 = "MCI/AD", P09686 = "CU", P10507 = "CU", P19834 = "CU", P19863 = "FTLD", P10020 = "CU", P09684 = "CU", P10522 = "CU", P10452 = "CU", P17162 = "CU", P10454 = "CU", P19881 = "FTLD", P19897 = "MCI/AD", P10090 = "CU", P19920 = "MCI/AD", P09811 = "CU", P10091 = "MCI/AD", P19923 = "FTLD", P10512 = "MCI/AD", P17001 = "MCI/AD", P10529 = "CU", P19919 = "MCI/AD", P19931 = "FTLD", P19507 = "MCI/AD", P19935 = "FTLD", P19562 = "MCI/AD", P10410 = "CU", P10141 = "CU", P19644 = "MCI/AD", H3QM65 = "YA",H4DY25 = "YA", H4NG35 = "YA", H4Z538 = "YA", H5UZ45  = "YA", H6MU95 = "YA", H6PW98 = "YA", H7DT28 = "YA", H7YT95 = "YA", H8FB78 = "YA", H8SU68 = "YA", H9TT58 = "YA",H4FF48 = "YA")
+statsDataFull <- statsDataFull %>% add_column(dx)
+date<-format(Sys.time(), "%y%m%d")
+#write_csv(statsDataFull,paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Lists/statsDataFull_",date,".csv"))
+```
+
+
+```{r Statistical Tests 1mm, echo=FALSE}
+statsDataFull<-read_csv("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Lists/statsDataFull_230814.csv")
+statsDataFull %>% select(ID) %>% unique()
+statsDataFull %>% select(ID,dx) %>% unique() %>% group_by(dx) %>% summarise(n=n())
+
+ADNI<-statsDataFull %>% filter(ListName == "ADNI" & Ncombined == 1)
+CSx6_1<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == 1)
+CSx6_2<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == 2)
+CSx6_4<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == 4)
+CSx6_8<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == 8)
+
+results_Full<-tibble(brainVar=character(),origData=character(),meanADNIerror=numeric(),meanCSx6error=numeric(),estimate=numeric(),t_value=numeric(),p_value=numeric(),nComb=numeric())
+
+uniqRegionType<-unique(paste(ADNI$region,ADNI$origData,sep="_"))
+
+###Compare all CSx6 to ADNI
+for(N in c(1,2,4,8)){
+  CSdata<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == N)
+  testData<-bind_rows(ADNI,CSdata)
+  testData<-testData %>% unite(.,"regionType",region,origData,remove=F)
+  for(brainVar in uniqRegionType){
+    testDataLong<-testData %>% filter(regionType==brainVar) %>% select(ListName,region,ID,percentError,origData) %>% distinct()
+    testDataWide<- testDataLong %>% pivot_wider(names_from = ListName,values_from = percentError)
+    result<-t.test(testDataWide$ADNI, testDataWide$CSx6_1mm, paired = TRUE, alternative = "two.sided")
+    
+    # Extract the values of interest
+    meanADNIerror<-mean(testDataWide$ADNI)
+    meanCSx6error<-mean(testDataWide$CSx6_1mm)
+    estimate <- as.numeric(result$estimate)
+    t_value <- result$statistic
+    p_value <- result$p.value
+    confidence_interval <- result$conf.int
+    varInfo<-as_vector(str_split(brainVar,"_"))
+    result_tibble <- tibble(brainVar = varInfo[1],origData=varInfo[2],meanADNIerror=meanADNIerror,meanCSx6error=meanCSx6error, estimate = estimate, t_value = t_value, p_value = p_value, nComb=N)
+  
+    results_Full <- bind_rows(results_Full, result_tibble)
+    
+  }
+}
+results_Full<-results_Full %>% mutate(perImprovement=estimate/meanADNIerror*100) %>% distinct()
+
+write_csv(results_Full,"/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Lists/allMorphometricsStats_231121.csv")
+
+##Mean measurement errors across all morphometrics and subs
+ADNIsum<-ADNI %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError))
+CSx6_1sum<-CSx6_1 %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError))
+CSx6_2sum<-CSx6_2 %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError))
+CSx6_4sum<-CSx6_4 %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError))
+CSx6_8sum<-CSx6_8 %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError))
+
+##Mean measurement errors for each type of morph separately across all morphometrics and subs
+ADNI %>% group_by(origData) %>% summarise(mean=mean(percentError),median=median(percentError),sd=sd(percentError))
+ADNImean <- ADNI %>% group_by(origData) %>% summarise(mean=mean(percentError)) %>% select(mean)
+CSx6_1 %>% group_by(origData) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError)) %>% mutate(ADNIratio = ADNImean/mean)
+CSx6_2 %>% group_by(origData) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError)) %>% mutate(ADNIratio = ADNImean/mean)
+CSx6_4 %>% group_by(origData) %>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError)) %>% mutate(ADNIratio = ADNImean/mean)
+CSx6_8 %>% group_by(origData)%>% summarise(mean=mean(percentError),sd=sd(percentError),median=median(percentError)) %>% mutate(ADNIratio = ADNImean/mean)
+
+############# 1 CSx6
+###percent of morphometrics where 1 CSx6 scans are better
+results_Full_n1<-results_Full %>% filter(nComb == 1)
+(CSx6_1sum$mean/ ADNIsum$mean) #Fold reduction in mean error
+sum(results_Full_n1$estimate > 0)/nrow(results_Full_n1)*100
+###percent of morphometrics where 1 CSx6 scans are significantly better
+results_CSbetter_n1<-results_Full_n1 %>% filter(estimate >0)
+sum(results_CSbetter_n1$p_value < 0.05)/nrow(results_Full_n1)*100
+#Mean and percent improvement for 1 CSx6 scans
+mean(results_Full_n1$estimate)
+mean(results_Full_n1$perImprovement)
+
+############# 2 CSx6
+###percent of morphometrics where 4 CSx6 scans are better
+results_Full_n2<-results_Full %>% filter(nComb == 2)
+(CSx6_2sum$mean/ ADNIsum$mean) #Fold reduction in mean error
+sum(results_Full_n2$estimate > 0)/nrow(results_Full_n2)*100
+###percent of morphometrics where 4 CSx6 scans are significantly better
+results_CSbetter_n2<-results_Full_n2 %>% filter(estimate >0)
+sum(results_CSbetter_n2$p_value < 0.05)/nrow(results_Full_n2)*100
+#Mean and percent improvement for 4 CSx6 scans
+mean(results_Full_n2$estimate)
+mean(results_Full_n2$perImprovement)
+
+############# 4 CSx6
+###percent of morphometrics where 4 CSx6 scans are better
+results_Full_n4<-results_Full %>% filter(nComb == 4)
+(CSx6_4sum$mean/ ADNIsum$mean) #Fold reduction in mean error
+sum(results_Full_n4$estimate > 0)/nrow(results_Full_n4)*100
+###percent of morphometrics where 4 CSx6 scans are significantly better
+results_CSbetter_n4<-results_Full_n4 %>% filter(estimate >0)
+sum(results_CSbetter_n4$p_value < 0.05)/nrow(results_Full_n4)*100
+#Mean and percent improvement for 4 CSx6 scans
+mean(results_Full_n4$estimate)
+mean(results_Full_n4$perImprovement)
+
+############# 8 CSx6
+###percent of morphometrics where 4 CSx6 scans are better
+results_Full_n8<-results_Full %>% filter(nComb == 8)
+(CSx6_8sum$mean/ ADNIsum$mean) #Fold reduction in mean error
+sum(results_Full_n8$estimate > 0)/nrow(results_Full_n8)*100
+###percent of morphometrics where 4 CSx6 scans are significantly better
+results_CSbetter_n8<-results_Full_n8 %>% filter(estimate >0)
+sum(results_CSbetter_n8$p_value < 0.05)/nrow(results_Full_n8)*100
+#Mean and percent improvement for 4 CSx6 scans
+mean(results_Full_n8$estimate)
+(mean(results_Full_n8$meanADNIerror) - mean(results_Full_n8$meanCSx6error)) /mean(results_Full_n8$meanADNIerror) *100
+
+
+##Mean measurement errors by Group across all morphometrics
+ADNI %>% group_by(dx) %>% summarise(mean=mean(percentError),sd=sd(percentError))
+ADNImeanGroup <- ADNI %>% group_by(dx) %>% summarise(mean=mean(percentError)) %>% select(mean)
+CSx6_1 %>% group_by(dx)  %>% summarise(mean=mean(percentError),sd=sd(percentError)) %>% mutate(ADNIratio = (ADNImeanGroup$mean - mean) /ADNImeanGroup$mean)
+CSx6_2 %>% group_by(dx)  %>% summarise(mean=mean(percentError),sd=sd(percentError)) %>% mutate(ADNIratio = (ADNImeanGroup$mean - mean) /ADNImeanGroup$mean)
+CSx6_4 %>% group_by(dx)  %>% summarise(mean=mean(percentError),sd=sd(percentError)) %>% mutate(ADNIratio = (ADNImeanGroup$mean - mean) /ADNImeanGroup$mean)
+CSx6_8 %>% group_by(dx)  %>% summarise(mean=mean(percentError),sd=sd(percentError)) %>% mutate(ADNIratio = (ADNImeanGroup$mean - mean) /ADNImeanGroup$mean)
+
+ADNI %>% group_by(dx,origData) %>% summarise(mean=mean(percentError),sd=sd(percentError))
+CSx6_1 %>% group_by(dx,origData)  %>% summarise(mean=mean(percentError),sd=sd(percentError))
+CSx6_2 %>% group_by(dx,origData)  %>% summarise(mean=mean(percentError),sd=sd(percentError))
+CSx6_4 %>% group_by(dx,origData)  %>% summarise(mean=mean(percentError),sd=sd(percentError))
+CSx6_8 %>% group_by(dx,origData)  %>% summarise(mean=mean(percentError),sd=sd(percentError))
+
+```
+
+
+```{r Statistical Tests for Break and Xmm tests, echo=FALSE}
+
+statsDataFull %>% select(ID) %>% unique()
+
+ADNI<-statsDataFull %>% filter(ListName == "ADNI" & Ncombined == 1)
+CSx6_break<-statsDataFull %>% filter(ListName == "CSx6_1mmBreak" & Ncombined == 2)
+CSx6_noBreak<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == 2)
+CSx6_1mm<-statsDataFull %>% filter(ListName == "CSx6_1mm" & Ncombined == 4)
+CSx6_Xmm<-statsDataFull %>% filter(ListName == "CSx6_non1mmScans" & Ncombined == 4)
+
+
+###Break vs No break summary stats
+
+testData<-bind_rows(CSx6_break,CSx6_noBreak)
+testData<-testData %>% unite(.,"regionType",region,origData,remove=F)
+results_Full_Break<-tibble(brainVar=character(),meanBreakerror=numeric(),meanCSx6error=numeric(),estimate=numeric(),t_value=numeric(),p_value=numeric())
+
+for(brainVar in uniqRegionType){
+  testDataLong<-testData %>% filter(regionType==brainVar) %>% select(ListName,region,ID,percentError,origData) %>% distinct()
+  testDataWide<- testDataLong %>% pivot_wider(names_from = c(ListName),values_from = percentError)
+  result<-t.test(testDataWide$CSx6_1mmBreak, testDataWide$CSx6_1mm, paired = TRUE, alternative = "two.sided")
+  
+  # Extract the values of interest
+  meanBreakerror<-mean(testDataWide$CSx6_1mmBreak)
+  meanCSx6error<-mean(testDataWide$CSx6_1mm)
+  estimate <- as.numeric(result$estimate)
+  t_value <- result$statistic
+  p_value <- result$p.value
+  confidence_interval <- result$conf.int
+  result_tibble <- tibble(brainVar = brainVar,meanBreakerror=meanBreakerror,meanCSx6error=meanCSx6error, estimate = estimate, t_value = t_value, p_value = p_value)
+
+  results_Full_Break <- bind_rows(results_Full_Break, result_tibble)
+  
+}
+results_Full_Break<-results_Full_Break %>% mutate(perImprovement=estimate/meanCSx6error*100)
+
+##Mean measurement errors across all morphometrics and subs
+CSx6_break %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError))
+CSx6_noBreak %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError))
+
+###percent of morphometrics where the Break was resulted in lower error
+sum(results_Full_Break$estimate < 0)/nrow(results_Full_Break)*100
+
+
+#Mean and percent improvement
+mean(results_Full_Break$estimate)
+(mean(results_Full_Break$meanCSx6error) - mean(results_Full_Break$meanBreakerror)) /mean(results_Full_Break$meanCSx6error) *100
+
+###percent of morphometrics where 4 CSx6 with a break were significantly better
+results_BreakBetter<-results_Full_Break %>% filter(estimate <0)
+sum(results_BreakBetter$p_value < 0.05)/nrow(results_Full_Break)*100
+
+
+###Xmm vs 1mm summary stats
+
+testData<-bind_rows(CSx6_Xmm,CSx6_1mm)
+testData<-testData %>% unite(.,"regionType",region,origData,remove=F)
+
+results_Full_Xmm<-tibble(brainVar=character(),meanXmmError=numeric(),meanCSx6error=numeric(),estimate=numeric(),t_value=numeric(),p_value=numeric())
+
+for(brainVar in uniqRegionType){
+  testDataLong<-testData %>% filter(regionType==brainVar) %>% select(ListName,region,ID,percentError) %>% distinct()
+  testDataWide<- testDataLong %>% pivot_wider(names_from = c(ListName),values_from = percentError)
+  result<-t.test(testDataWide$CSx6_non1mmScans, testDataWide$CSx6_1mm, paired = TRUE, alternative = "two.sided")
+  
+  # Extract the values of interest
+  meanXmmError<-mean(testDataWide$CSx6_non1mmScans)
+  meanCSx6error<-mean(testDataWide$CSx6_1mm)
+  estimate <- as.numeric(result$estimate)
+  t_value <- result$statistic
+  p_value <- result$p.value
+  confidence_interval <- result$conf.int
+  result_tibble <- tibble(brainVar = brainVar,meanXmmError=meanXmmError,meanCSx6error=meanCSx6error, estimate = estimate, t_value = t_value, p_value = p_value)
+
+  results_Full_Xmm <- bind_rows(results_Full_Xmm, result_tibble)
+  
+}
+
+
+##Mean measurement errors across all morphometrics and subs
+CSx6_Xmm %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError))
+CSx6_1mm %>% select(percentError) %>% summarise(mean=mean(percentError),sd=sd(percentError))
+
+###percent of morphometrics where the Break was resulted in lower error
+sum(results_Full_Xmm$estimate < 0)/nrow(results_Full_Xmm)*100
+
+###percent of morphometrics where 4 CSx6 with a break were significantly better
+results_XmmBetter<-results_Full_Xmm %>% filter(estimate <0)
+sum(results_XmmBetter$p_value < 0.05)/nrow(results_Full_Xmm)*100
+
+#Mean and percent improvement
+mean(results_Full_Xmm$estimate)
+(mean(results_Full_Xmm$meanCSx6error) - mean(results_Full_Xmm$meanXmmError)) /mean(results_Full_Xmm$meanCSx6error) *100
+
+```
+
+
+```{r Group Average Plots, echo=FALSE}
+#Check if you have the right morphometrics
+statsDataFull %>% unite("region_type",region,origData,sep = "_") %>% select(region_type) %>% unique()
+
+
+############ Figure 3
+
+cpal<-c("#7ad151", "#21918c","#38588c", "#440154")
+
+statsData_regionSummary<- statsDataFull %>% group_by(ListName,Ncombined,region,origData) %>% summarise(meanPerError=mean(percentError))
+statsData_regionSummary$origData<-statsData_regionSummary$origData %>% str_replace_all(c("vol" = "Volume", "GWcon" = "GWR", "Thick" = "Thickness"))
+
+###Grab subset of 1,4 and 8 CSx6 and calculate raw error % improvement from ADNI
+statsData_regionSummary_ADNI <- statsData_regionSummary %>% filter(ListName == "ADNI", Ncombined == 1)
+statsData_regionSummary_CSx6Sub <- statsData_regionSummary %>% filter(ListName == "CSx6_1mm") %>% filter(Ncombined %in% c(1,2,4,8))
+statsData_regionSummary_Fig3 <- bind_rows(statsData_regionSummary_ADNI,statsData_regionSummary_CSx6Sub)
+statsData_regionSummary_Fig3<-statsData_regionSummary_Fig3 %>% unite("measType",ListName,Ncombined)
+statsData_regionSummary_Fig3_wide <- statsData_regionSummary_Fig3 %>% pivot_wider(names_from = c(measType), values_from = meanPerError)
+statsData_regionSummary_Fig3_wide<-statsData_regionSummary_Fig3_wide %>% mutate(CSx6_n1_ADNIerrorDiff = ADNI_1 - CSx6_1mm_1,CSx6_n2_ADNIerrorDiff = ADNI_1 - CSx6_1mm_2,CSx6_n4_ADNIerrorDiff = ADNI_1 - CSx6_1mm_4,CSx6_n8_ADNIerrorDiff = ADNI_1 - CSx6_1mm_8)
+statsData_regionSummary_Fig3_long<-statsData_regionSummary_Fig3_wide %>% select(!3:7) %>% pivot_longer(3:6,names_to = "scanType",values_to = "errorDiff")
+statsData_regionSummary_Fig3_long$origData<-factor(statsData_regionSummary_Fig3_long$origData,levels = c("Volume","Thickness","GWR"))
+statsData_regionSummary_Fig3_long$scanType<-statsData_regionSummary_Fig3_long$scanType %>% str_replace_all(c("CSx6_n1_ADNIerrorDiff" = "1 CS","CSx6_n2_ADNIerrorDiff" = "2 CS", "CSx6_n4_ADNIerrorDiff" = "4 CS", "CSx6_n8_ADNIerrorDiff" = "8 CS"))
+
+Palette3 <- c("steelblue1", "steelblue3", "steelblue4")
+
+p1<-ggplot(data= statsData_regionSummary_Fig3_long,aes(x= origData, y= errorDiff,colour=scanType)) +
+    scale_colour_manual(values=cpal, name= " ") + scale_size(guide = 'none') +
+    theme_classic() + #geom_violin(position = position_dodge(width = .75),show.legend = F) + 
+    geom_boxplot(position = position_dodge(width = .75),show.legend = T,width=.5, outlier.shape = NA) +
+    scale_y_continuous(breaks=seq(-2,4,2),expand = c(0,0))+ 
+    geom_hline(yintercept=0,linetype=2) +
+    coord_cartesian(clip = 'off',ylim = c(-2,4*1.005),) +
+    theme(text = element_text(family = "Geneva"),
+          axis.line = element_line(size = 0.75),
+          axis.ticks = element_line(colour = "black", size = 0.75),
+          plot.title=element_text(size=16),		
+          plot.margin = margin(0.2,0.25,0.1,0.1, "in"),
+          axis.title.x=element_text(size=11, margin = margin(t = 5, r = 0, b = 0, l = 0)), 		
+          axis.title.y=element_text(size=11, margin = margin(t = 0, r = 5, b = 0, l = 0)), 
+          axis.text.y=element_text(size=11, colour="black"), 
+          axis.text.x=element_text( size=11, colour="black"), 
+          legend.title=element_text(size=11), 
+          legend.text=element_text(size=11),
+          legend.position=c(.15,1.12),
+          legend.spacing.x = unit(.05,"cm"),
+          legend.justification=c(.8,1),
+          legend.text.align = 0,
+          legend.background = element_rect(fill='transparent')) + 
+    labs(y="Absolute Error Improvement Over ADNI (%)",x="Measure Type")
+  plot(p1)
+  ggsave(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/rawRelativeErrors_alt_ADNItoCSx6.png"), plot= p1, width = 6, height =4, unit="in", dpi=500)
+  
+
+############ Figure 5
+statsData_Summary<- statsDataFull %>% group_by(ListName,Ncombined,region,origData,dx) %>% summarise(meanPerError=mean(percentError))
+statsData_Summary$origData<-statsData_Summary$origData %>% str_replace_all(c("vol" = "Volume", "GWcon" = "GWR", "Thick" = "Thickness"))
+###Grab subset of 1,4 and 8 CSx6 and calculate raw error % improvement from ADNI
+statsData_regionSummary_ADNI <- statsData_Summary %>% filter(ListName == "ADNI", Ncombined == 1)
+statsData_regionSummary_CSx6Sub <- statsData_Summary %>% filter(ListName == "CSx6_1mm") %>% filter(Ncombined %in% c(1,2,4,8))
+statsData_regionSummary_Fig5 <- bind_rows(statsData_regionSummary_ADNI,statsData_regionSummary_CSx6Sub)
+statsData_regionSummary_Fig5<-statsData_regionSummary_Fig5 %>% unite("measType",ListName,Ncombined)
+statsData_regionSummary_Fig5_wide <- statsData_regionSummary_Fig5 %>% pivot_wider(names_from = c(measType), values_from = meanPerError)
+statsData_regionSummary_Fig5_wide<-statsData_regionSummary_Fig5_wide %>% mutate(CSx6_n1_ADNIerrorDiff = ADNI_1 - CSx6_1mm_1,CSx6_n2_ADNIerrorDiff = ADNI_1 - CSx6_1mm_2,CSx6_n4_ADNIerrorDiff = ADNI_1 - CSx6_1mm_4,CSx6_n8_ADNIerrorDiff = ADNI_1 - CSx6_1mm_8)
+statsData_regionSummary_Fig5_long<-statsData_regionSummary_Fig5_wide %>% select(!4:8) %>% pivot_longer(4:7,names_to = "scanType",values_to = "errorDiff")
+statsData_regionSummary_Fig5_long$origData<-factor(statsData_regionSummary_Fig5_long$origData,levels = c("Volume","Thickness","GWR"))
+statsData_regionSummary_Fig5_long$dx<-statsData_regionSummary_Fig5_long$dx %>% str_replace_all(c("CU" = "OA"))
+statsData_regionSummary_Fig5_long$dx<-statsData_regionSummary_Fig5_long$dx %>% str_replace_all(c("OA" = "OA (N=18)")) %>% str_replace_all(c("YA" = "YA (N=12)")) %>% str_replace_all(c("MCI/AD" = "MCI/AD (N=10)"))
+statsData_regionSummary_Fig5_long$dx<-factor(statsData_regionSummary_Fig5_long$dx,levels = c("YA (N=12)","OA (N=18)","MCI/AD (N=10)"))
+statsData_regionSummary_Fig5_long$scanType<-statsData_regionSummary_Fig5_long$scanType %>% str_replace_all(c("CSx6_n1_ADNIerrorDiff" = "1 CS","CSx6_n2_ADNIerrorDiff" = "2 CS", "CSx6_n4_ADNIerrorDiff" = "4 CS", "CSx6_n8_ADNIerrorDiff" = "8 CS"))
+
+p1<-ggplot(data= statsData_regionSummary_Fig5_long,aes(x= dx, y= errorDiff,colour=scanType)) +
+    scale_colour_manual(values=cpal, name= " ") + scale_size(guide = 'none') +
+    theme_classic() + #geom_violin(position = position_dodge(width = .75),show.legend = F) + 
+    geom_boxplot(position = position_dodge(width = .75),show.legend = T,width=.5,outlier.shape = NA) +
+    scale_y_continuous(breaks=seq(-4,6,2),expand = c(0,0))+ 
+    geom_hline(yintercept=0,linetype=2) +
+    coord_cartesian(ylim=c(-3.5,5*1.005),clip = 'off') +
+    theme(text = element_text(family = "Geneva"),
+          axis.line = element_line(size = 0.75),
+          axis.ticks = element_line(colour = "black", size = 0.75),
+          plot.title=element_text(size=16),		
+          plot.margin = margin(0.2,0.25,0.1,0.1, "in"),
+          axis.title.x=element_text(size=11, margin = margin(t = 5, r = 0, b = 0, l = 0)), 		
+          axis.title.y=element_text(size=11, margin = margin(t = 0, r = 5, b = 0, l = 0)), 
+          axis.text.y=element_text(size=11, colour="black"), 
+          axis.text.x=element_text( size=11, colour="black"), 
+          legend.title=element_text(size=11), 
+          legend.text=element_text(size=11),
+          legend.position=c(.15,1.12),
+          legend.spacing.x = unit(.05,"cm"),
+          legend.justification=c(.8,1),
+          legend.text.align = 0,
+          legend.background = element_rect(fill='transparent')) + 
+    labs(y="Absolute Error Improvement Over ADNI (%)",x="Group")
+  plot(p1)
+  ggsave(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/rawRelativeErrorsByGroup_alt_ADNItoCSx6.png"), plot= p1, width = 6, height =4, unit="in", dpi=500)
+
+
+############ Figure 6
+statsData_Summary<- statsDataFull %>% group_by(ListName,Ncombined,region,origData) %>% summarise(meanPerError=mean(percentError))
+statsData_Summary$origData<-statsData_Summary$origData %>% str_replace_all(c("vol" = "Volume", "GWcon" = "GWR", "Thick" = "Thickness"))
+statsData_Summary_Break <- statsData_Summary %>% filter(ListName == "CSx6_1mmBreak" & Ncombined == 2)
+statsData_Summary_Res <- statsData_Summary %>% filter(ListName == "CSx6_non1mmScans", Ncombined == 4)
+statsData_Summary_CS <- statsData_Summary %>% filter(ListName == "CSx6_1mm", Ncombined %in% c(2,4))
+
+statsData_Summary_Fig6<-bind_rows(statsData_Summary_Break,statsData_Summary_Res,statsData_Summary_CS)
+statsData_Summary_Fig6<-statsData_Summary_Fig6 %>% unite("measType",ListName,Ncombined)
+
+statsData_regionSummary_Fig6_wide <- statsData_Summary_Fig6 %>% pivot_wider(names_from = c(measType), values_from = meanPerError)
+statsData_regionSummary_Fig6_wide<-statsData_regionSummary_Fig6_wide %>% mutate(CSx6_n2_BreakEffect = CSx6_1mm_2 - CSx6_1mmBreak_2 ,CSx6_n4_ResEffect = CSx6_1mm_4 - CSx6_non1mmScans_4 )
+statsData_regionSummary_Fig6_long<-statsData_regionSummary_Fig6_wide %>% select(!3:6) %>% pivot_longer(3:4,names_to = "scanType",values_to = "errorDiff")
+statsData_regionSummary_Fig6_long$origData<-factor(statsData_regionSummary_Fig6_long$origData,levels = c("Volume","Thickness","GWR"))
+statsData_regionSummary_Fig6_long$scanType<-statsData_regionSummary_Fig6_long$scanType %>% str_replace_all(c("CSx6_n2_BreakEffect" = "2", "CSx6_n4_ResEffect" = "4"))
+
+plotData_Break<-statsData_regionSummary_Fig6_long %>% filter(scanType == "2")
+plotData_Res<-statsData_regionSummary_Fig6_long %>% filter(scanType == "4")
+
+p1<-ggplot(data= plotData_Break,aes(x= scanType, y= errorDiff,colour=origData)) +
+    scale_colour_manual(values=Palette2, name= " ") + scale_size(guide = 'none') +
+    theme_classic() + #geom_violin(position = position_dodge(width = .75),show.legend = F) + 
+    geom_boxplot(position = position_dodge(width = .75),show.legend = T,width=.5,outlier.shape = NA) +
+    scale_y_continuous(breaks=seq(-2,2,1),expand = c(0,0)) + 
+    geom_hline(yintercept=0,linetype=2) +
+    coord_cartesian(ylim=c(-2,2*1.005),clip = 'off') +
+    theme(text = element_text(family = "Geneva"),
+          axis.line = element_line(size = 0.75),
+          axis.ticks = element_line(colour = "black", size = 0.75),
+          plot.title=element_text(size=16),		
+          plot.margin = margin(0.2,0.25,0.1,0.1, "in"),
+          axis.title.x=element_text(size=11, margin = margin(t = 5, r = 0, b = 0, l = 0)), 		
+          axis.title.y=element_text(size=11, margin = margin(t = 0, r = 5, b = 0, l = 0)), 
+          axis.text.y=element_text(size=11, colour="black"), 
+          axis.text.x=element_text( size=11, colour="black"), 
+          legend.title=element_text(size=11), 
+          legend.text=element_text(size=11),
+          legend.position=c(.22,1.12),
+          legend.spacing.x = unit(.05,"cm"),
+          legend.justification=c(.6,1),
+          legend.text.align = 0,
+          legend.background = element_rect(fill='transparent')) + 
+    labs(y="Benefit of Break (% Absolute Error)",x="CS 1.0mm")
+  plot(p1)
+  ggsave(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/EffectOfBreak_RawErrors.png"), plot= p1, width = 4, height =4, unit="in", dpi=500)
+
+p1<-ggplot(data= plotData_Res,aes(x= scanType, y= errorDiff,colour=origData)) +
+  scale_colour_manual(values=Palette2, name= " ") + scale_size(guide = 'none') +
+  theme_classic() + #geom_violin(position = position_dodge(width = .75),show.legend = F) + 
+  geom_boxplot(position = position_dodge(width = .75),show.legend = T,width=.5,outlier.shape = NA) +
+  scale_y_continuous(breaks=seq(-2,2,1),expand = c(0,0)) + 
+  geom_hline(yintercept=0,linetype=2) +
+  coord_cartesian(ylim=c(-2,2*1.005),clip = 'off') +
+  theme(text = element_text(family = "Geneva"),
+        axis.line = element_line(size = 0.75),
+        axis.ticks = element_line(colour = "black", size = 0.75),
+        plot.title=element_text(size=16),		
+        plot.margin = margin(0.2,0.25,0.1,0.1, "in"),
+        axis.title.x=element_text(size=11, margin = margin(t = 5, r = 0, b = 0, l = 0)), 		
+        axis.title.y=element_text(size=11, margin = margin(t = 0, r = 5, b = 0, l = 0)), 
+        axis.text.y=element_text(size=11, colour="black"), 
+        axis.text.x=element_text( size=11, colour="black"), 
+        legend.title=element_text(size=11), 
+        legend.text=element_text(size=11),
+        legend.position=c(.22,1.12),
+        legend.spacing.x = unit(.05,"cm"),
+        legend.justification=c(.6,1),
+        legend.text.align = 0,
+        legend.background = element_rect(fill='transparent')) + 
+  labs(y="Benefit of Multi-Resolution (% Absolute Error)",x="CS Multi-Resolution")
+plot(p1)
+ggsave(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/EffectOfRes_RawErrors.png"), plot= p1, width = 4, height =4, unit="in", dpi=500)
+
+p1<-image_read(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/EffectOfBreak_RawErrors.png")) %>% image_ggplot(interpolate = F)
+p2<-image_read(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/EffectOfRes_RawErrors.png")) %>% image_ggplot(interpolate = F)
+
+QCGrid<-ggarrange(p1,p2,ncol = 2, nrow=1)#,align = "hv")
+ggsave(paste(paste0("/Users/maxwellelliott/MyFiles/Manuscripts/aggregation_ClusterScanning/Visualizations/Plots/Grid_EffectOfBreakAndRes_RawErrors.png",sep = "")),plot=QCGrid, dpi=500,width = 8, height =4, unit="in")
+
+```
+
